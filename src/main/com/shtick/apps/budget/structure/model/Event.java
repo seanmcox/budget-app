@@ -59,6 +59,7 @@ public class Event {
 	 * @param transactionID
 	 * @param when
 	 * @param type
+	 * @param total 
 	 * @param note
 	 */
 	public Event(EventID id, UserID userID, TransactionID transactionID, LocalDateTime when, Type type, String note) {

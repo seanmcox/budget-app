@@ -11,6 +11,7 @@ import com.shtick.apps.budget.structure.model.Category;
 import com.shtick.apps.budget.structure.model.CategoryID;
 import com.shtick.apps.budget.structure.model.Event;
 import com.shtick.apps.budget.structure.model.EventID;
+import com.shtick.apps.budget.structure.model.LedgerItem;
 import com.shtick.apps.budget.structure.model.Permission;
 import com.shtick.apps.budget.structure.model.Transaction;
 import com.shtick.apps.budget.structure.model.TransactionID;
@@ -98,6 +99,25 @@ public abstract class Driver {
 	 * @throws IOException
 	 */
 	public abstract boolean undeleteTransaction(TransactionID transactionID, String note) throws IOException;
+	
+	/**
+	 * Return all the ledger items from the given category on the given date.
+	 * 
+	 * @param categoryID 
+	 * @param when
+	 * @return A list of ledger items. 
+	 * @throws IOException 
+	 */
+	public abstract List<LedgerItem> getLedgerItems(CategoryID categoryID, LocalDate when) throws IOException;
+
+	/**
+	 * Return all the ledger items for the given transaction.
+	 * 
+	 * @param transactionID 
+	 * @return A list of ledger items. 
+	 * @throws IOException 
+	 */
+	public abstract List<LedgerItem> getLedgerItems(TransactionID transactionID) throws IOException;
 	
 	/**
 	 * 
