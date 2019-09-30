@@ -122,10 +122,12 @@ public abstract class Driver {
 	/**
 	 * 
 	 * @param parentCategory 
+	 * @param includeDeleted 
 	 * @return A list of categories that are children of the identified parent category, or all the main categories if parentCategory is null.
 	 * @throws IOException
+	 * 
 	 */
-	public abstract List<Category> getCategories(CategoryID parentCategory) throws IOException;
+	public abstract List<Category> getCategories(CategoryID parentCategory, boolean includeDeleted) throws IOException;
 	
 	/**
 	 * 
@@ -136,9 +138,10 @@ public abstract class Driver {
 	public abstract Category getCategory(CategoryID id) throws IOException;
 
 	/**
+	 * Creates a new category in the database with the name, parent_id, and currency_id of the given category prototype. The total will be 0.
 	 * 
 	 * @param category
-	 * @return true on success or false otherwise
+	 * @return The ID of the new category or null if a category record was not created.
 	 * @throws IOException
 	 */
 	public abstract CategoryID addCategory(Category category) throws IOException;
@@ -149,8 +152,9 @@ public abstract class Driver {
 	 * @param categoryID
 	 * @return true on success or false otherwise
 	 * @throws IOException
+	 * @throws IllegalArgumentException If the category identified has subcategories that aren't deleted.
 	 */
-	public abstract boolean removeCategory(CategoryID categoryID) throws IOException;
+	public abstract boolean removeCategory(CategoryID categoryID) throws IOException, IllegalArgumentException;
 	
 	/**
 	 * In principle, this doesn't have to be implemented. It will be impossible to restore a category that has undergone a hard delete.
@@ -158,8 +162,9 @@ public abstract class Driver {
 	 * @param categoryID
 	 * @return true on success or false otherwise
 	 * @throws IOException
+	 * @throws IllegalArgumentException If the category identified has a deleted parent.
 	 */
-	public abstract boolean restoreCategory(CategoryID categoryID) throws IOException;
+	public abstract boolean restoreCategory(CategoryID categoryID) throws IOException, IllegalArgumentException;
 	
 	/**
 	 * 

@@ -110,9 +110,8 @@ public class MainDriver extends Driver{
 		                   " currency_id   INT  NOT NULL," +
 		                   " name          TEXT NOT NULL," +
 		                   " total         INT  NOT NULL," +
-		                   " permissions   TEXT NOT NULL," +
 		                   " time_added    TEXT NOT NULL," +
-		                   " time_deleted  TEXT NOT NULL" +
+		                   " time_deleted  TEXT" +
 		                   ")");
 				statement.executeUpdate("CREATE INDEX idx_category_parent ON categories (parent_id);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS category_permissions" +
@@ -179,24 +178,31 @@ public class MainDriver extends Driver{
 	public CategoryID addCategory(Category category) throws IOException {
 		if(!isAdmin(category.getParentID()))
 			throw new AuthenticationException("The current user is not an authorized administrator.");
+		String columnList = "currency_id, name, total, time_added";
+		String valueList = "?,?,0,?";
+		if(category.getParentID()!=null) {
+			columnList += ", parent_id";
+			valueList += ",?";
+		}
 		String sql = "INSERT INTO categories " +
-                "(parent_id, currency_id, name, total, permissions, time_added) " +
-				"VALUES (?,?,?,0,?,?)";
+                "("+columnList+") " +
+				"VALUES ("+valueList+")";
 		synchronized(DB_LOCK){
 			try (Connection connection = DriverManager.getConnection(DB_URL);PreparedStatement statement = connection.prepareStatement(sql);) {
-				statement.setInt(1, (category.getParentID()!=null)?Integer.parseInt(category.getParentID().toString()):null);
-				statement.setInt(2, Integer.parseInt(category.getCurrency().toString()));
-				statement.setString(3, category.getName());
-				statement.setString(4, category.getPermissions().toString());
-				statement.setString(5, LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME));
+				statement.setInt(1, Integer.parseInt(category.getCurrency().toString()));
+				statement.setString(2, category.getName());
+				statement.setString(3, LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME));
+				if(category.getParentID()!=null)
+					statement.setInt(4, Integer.parseInt(category.getParentID().toString()));
 				statement.executeUpdate();
 				ResultSet resultSet = statement.getGeneratedKeys();
 				if(!resultSet.next()) {
 					resultSet.close();
 					return null;
 				}
+				CategoryID retval = new CategoryID(""+resultSet.getInt(1));
 				resultSet.close();
-				return new CategoryID(""+resultSet.getInt(1));
+				return retval;
 			}
 			catch(SQLException t){
 				throw new IOException(t);
@@ -208,16 +214,18 @@ public class MainDriver extends Driver{
 	 * @see com.shtick.apps.budget.Driver#getCategories(com.shtick.apps.budget.structure.model.CategoryID)
 	 */
 	@Override
-	public List<Category> getCategories(CategoryID parentCategory) throws IOException {
+	public List<Category> getCategories(CategoryID parentCategory, boolean includeDeleted) throws IOException {
 		if(!canRead(parentCategory))
 			throw new AuthenticationException("The current user is not authorized to read.");
 		
-		String sql = "SELECT rowid, parent_id, name, currency_id, total, permissions, time_added, time_deleted " +
+		String sql = "SELECT rowid, parent_id, name, currency_id, total, time_added, time_deleted " +
 				"FROM categories WHERE";
 		if(parentCategory==null)
 			sql += " parent_id IS NULL";
 		else
 			sql += " parent_id = ?";
+		if(!includeDeleted)
+			sql += " AND time_deleted IS NULL";
 		synchronized(DB_LOCK){
 			try (
 					Connection connection = DriverManager.getConnection(DB_URL);
@@ -248,16 +256,15 @@ public class MainDriver extends Driver{
 			throw new AuthenticationException("The current user is not an authorized admin.");
 
 		// Check to see if there are non-deleted subcategories that would be affected.
-		List<Category> subcategories = getCategories(categoryID);
-		for(Category category:subcategories)
-			if(category.getTimeDeleted()!=null)
-				throw new IllegalArgumentException("The category given contains undeleted subcategories;");
-		
 		String sql = "UPDATE categories " +
                 "SET time_deleted = ? " +
 				"WHERE rowid = ? AND time_deleted IS NULL";
 		int rowsUpdated = 0;
 		synchronized(DB_LOCK){
+			List<Category> subcategories = getCategories(categoryID,false);
+			if(subcategories.size()>0)
+				throw new IllegalArgumentException("The category given contains undeleted subcategories;");
+
 			try (Connection connection = DriverManager.getConnection(DB_URL);PreparedStatement statement = connection.prepareStatement(sql);) {
 				statement.setString(1, LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME));
 				statement.setInt(2, Integer.parseInt(categoryID.toString()));
@@ -282,6 +289,16 @@ public class MainDriver extends Driver{
 				"WHERE rowid = ? AND time_deleted IS NOT NULL";
 		int rowsUpdated = 0;
 		synchronized(DB_LOCK){
+			Category category = getCategory(categoryID);
+			if(category ==null)
+				return false;
+			if(category.getParentID()!=null) {
+				Category parent = getCategory(category.getParentID());
+				if(parent == null)
+					throw new IOException("Parent category not found.");
+				if(parent.getTimeDeleted()!=null)
+					throw new IllegalArgumentException("Can't restore category with deleted parent.");
+			}
 			try (Connection connection = DriverManager.getConnection(DB_URL);PreparedStatement statement = connection.prepareStatement(sql);) {
 				statement.setInt(1, Integer.parseInt(categoryID.toString()));
 				rowsUpdated=statement.executeUpdate();
@@ -300,7 +317,7 @@ public class MainDriver extends Driver{
 	public Category getCategory(CategoryID id) throws IOException {
 		if(!canRead(id))
 			throw new AuthenticationException("The current user is not authorized to read.");
-		String sql = "SELECT rowid, parent_id, name, currency_id, total, permissions, time_added, time_deleted " +
+		String sql = "SELECT rowid, parent_id, name, currency_id, total, time_added, time_deleted " +
 				"FROM categories WHERE rowid = ?";
 		synchronized(DB_LOCK){
 			try (
@@ -364,7 +381,7 @@ public class MainDriver extends Driver{
 			try (Connection connection = DriverManager.getConnection(DB_URL);) {
 				Event.Type eventType;
 				LocalDateTime now = LocalDateTime.now();
-				String nowDateString = LocalDate.from(now).format(DateTimeFormatter.ISO_DATE_TIME);
+				String nowDateString = LocalDate.from(now).format(DateTimeFormatter.ISO_DATE);
 				String nowString = now.format(DateTimeFormatter.ISO_DATE_TIME);
 				if(transaction.getSourceCategoryID()==null) {
 					// Process income
@@ -449,12 +466,12 @@ public class MainDriver extends Driver{
 
 					Category category = getCategory(transaction.getDestinationCategoryID());
 					sql = "INSERT INTO ledger " +
-			                "(category_id, user_id, transaction_id, change, total, date, time_added) " +
+			                "(category_id, event_id, transaction_id, change, total, date, time_added) " +
 							"VALUES (?,?,?,?,?,?,?)";
 					statement = connection.prepareStatement(sql);
-					statement.setInt(1, transactionID);
+					statement.setInt(1, Integer.parseInt(transaction.getDestinationCategoryID().toString()));
 					statement.setInt(2, eventID);
-					statement.setInt(3, Integer.parseInt(transaction.getDestinationCategoryID().toString()));
+					statement.setInt(3, transactionID);
 					statement.setLong(4, transaction.getDestinationCurrency());
 					statement.setLong(5, category.getTotal());
 					statement.setString(6, nowDateString);
@@ -467,12 +484,12 @@ public class MainDriver extends Driver{
 
 					Category category = getCategory(transaction.getSourceCategoryID());
 					sql = "INSERT INTO ledger " +
-			                "(category_id, user_id, transaction_id, change, total, date, time_added) " +
+			                "(category_id, event_id, transaction_id, change, total, date, time_added) " +
 							"VALUES (?,?,?,?,?,?,?)";
 					statement = connection.prepareStatement(sql);
-					statement.setInt(1, transactionID);
+					statement.setInt(1, Integer.parseInt(transaction.getSourceCategoryID().toString()));
 					statement.setInt(2, eventID);
-					statement.setInt(3, Integer.parseInt(transaction.getSourceCategoryID().toString()));
+					statement.setInt(3, transactionID);
 					statement.setLong(4, -transaction.getSourceCurrency());
 					statement.setLong(5, category.getTotal());
 					statement.setString(6, nowDateString);
@@ -1142,15 +1159,14 @@ public class MainDriver extends Driver{
 	}
 
 	private static Category getCategoryFromResultSetRow(ResultSet resultSet) throws SQLException{
-		String timeDeleted = resultSet.getString(8);
+		String timeDeleted = resultSet.getString(7);
 		return new Category(
 				new CategoryID(""+resultSet.getInt(1)),
-				new CategoryID(""+resultSet.getInt(2)),
+				(resultSet.getObject(2) == null)?null:new CategoryID(""+resultSet.getInt(2)),
 				resultSet.getString(3),
 				new CurrencyID(""+resultSet.getInt(4)),
 				resultSet.getInt(5),
-				Permission.Permissions.valueOf(resultSet.getString(6)),
-				LocalDateTime.parse(resultSet.getString(7), DateTimeFormatter.ISO_DATE_TIME),
+				LocalDateTime.parse(resultSet.getString(6), DateTimeFormatter.ISO_DATE_TIME),
 				(timeDeleted==null)?null:LocalDateTime.parse(timeDeleted, DateTimeFormatter.ISO_DATE_TIME)
 				);
 	}

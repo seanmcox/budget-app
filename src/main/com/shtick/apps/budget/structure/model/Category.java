@@ -15,7 +15,6 @@ public class Category {
 	private String name;
 	private CurrencyID currency;
 	private int total;
-	private Permission.Permissions permissions;
 	private LocalDateTime timeAdded;
 	private LocalDateTime timeDeleted;
 	
@@ -30,7 +29,7 @@ public class Category {
 	 * @param timeAdded
 	 * @param timeDeleted 
 	 */
-	public Category(CategoryID id, CategoryID parentID, String name, CurrencyID currency, int total, Permission.Permissions permissions,
+	public Category(CategoryID id, CategoryID parentID, String name, CurrencyID currency, int total,
 			LocalDateTime timeAdded, LocalDateTime timeDeleted) {
 		super();
 		this.id = id;
@@ -38,7 +37,6 @@ public class Category {
 		this.name = name;
 		this.currency = currency;
 		this.total = total;
-		this.permissions = permissions;
 		this.timeAdded = timeAdded;
 		this.timeDeleted = timeDeleted;
 	}
@@ -76,13 +74,6 @@ public class Category {
 	 */
 	public int getTotal() {
 		return total;
-	}
-
-	/**
-	 * @return the permissions
-	 */
-	public Permission.Permissions getPermissions() {
-		return permissions;
 	}
 
 	/**
