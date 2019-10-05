@@ -41,6 +41,7 @@ public class Transaction {
 		this.destinationCategoryID = destinationCategoryID;
 		this.destinationCurrency = destinationCurrency;
 		this.deletedDate = deletedDate;
+		this.addedDate = addedDate;
 	}
 	
 	/**

@@ -24,6 +24,10 @@ public class TransactionID {
 	public String getId() {
 		return id;
 	}
+	
+	public String toString() {
+		return id;
+	}
 
 	/* (non-Javadoc)
 	 * @see java.lang.Object#hashCode()

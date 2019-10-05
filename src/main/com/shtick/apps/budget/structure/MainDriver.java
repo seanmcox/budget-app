@@ -104,7 +104,7 @@ public class MainDriver extends Driver{
 		                   " hash           TEXT    NOT NULL," +
 		                   " time_added     TEXT    NOT NULL" +
 		                   ")");
-				statement.executeUpdate("CREATE INDEX idx_user_name ON users (name,hash);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_user_name ON users (name,hash);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS categories" +
 		                   "(parent_id     INT," +
 		                   " currency_id   INT  NOT NULL," +
@@ -113,15 +113,15 @@ public class MainDriver extends Driver{
 		                   " time_added    TEXT NOT NULL," +
 		                   " time_deleted  TEXT" +
 		                   ")");
-				statement.executeUpdate("CREATE INDEX idx_category_parent ON categories (parent_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_category_parent ON categories (parent_id);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS category_permissions" +
 		                   "(category_id   INT  NOT NULL," +
 		                   " user_id       INT  NOT NULL," +
 		                   " permissions   TEXT NOT NULL," +
 		                   " time_added    TEXT NOT NULL" +
 		                   ")");
-				statement.executeUpdate("CREATE INDEX idx_permission_category ON category_permissions (category_id);");
-				statement.executeUpdate("CREATE INDEX idx_permission_user ON category_permissions (user_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_permission_category ON category_permissions (category_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_permission_user ON category_permissions (user_id);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS transactions " +
 		                   "(src_category_id  INT," +
 		                   " dest_category_id INT," +
@@ -131,9 +131,9 @@ public class MainDriver extends Driver{
 		                   " date             TEXT    NOT NULL," +
 		                   " time_added       TEXT    NOT NULL" +
 		                   ")");
-				statement.executeUpdate("CREATE INDEX idx_transaction_src ON transactions (src_category_id, date);");
-				statement.executeUpdate("CREATE INDEX idx_transaction_dest ON transactions (dest_category_id, date);");
-				statement.executeUpdate("CREATE INDEX idx_date ON transactions (date);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_transaction_src ON transactions (src_category_id, date);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_transaction_dest ON transactions (dest_category_id, date);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_date ON transactions (date);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS events " +
 		                   "(user_id        INT  NOT NULL," +
 		                   " transaction_id INT  NOT NULL," +
@@ -142,9 +142,9 @@ public class MainDriver extends Driver{
 		                   " date           TEXT NOT NULL," +
 		                   " time_added     TEXT NOT NULL" +
 		                   ")");
-				statement.executeUpdate("CREATE INDEX idx_event_transaction ON events (transaction_id);");
-				statement.executeUpdate("CREATE INDEX idx_event_user ON events (user_id);");
-				statement.executeUpdate("CREATE INDEX idx_event_date ON events (date);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_event_transaction ON events (transaction_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_event_user ON events (user_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_event_date ON events (date);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS ledger " +
 		                   "(transaction_id INT  NOT NULL," +
 		                   " event_id       INT  NOT NULL," +
@@ -154,8 +154,8 @@ public class MainDriver extends Driver{
 		                   " date           TEXT NOT NULL," +
 		                   " time_added     TEXT NOT NULL" +
 		                   ")");
-				statement.executeUpdate("CREATE INDEX idx_ledger_transaction ON ledger (transaction_id);");
-				statement.executeUpdate("CREATE INDEX idx_ledger_category ON ledger (category_id, date);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ledger_transaction ON ledger (transaction_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ledger_category ON ledger (category_id, date);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS currencies " +
 		                   "(name          TEXT    NOT NULL," +
 		                   " type          TEXT    NOT NULL," +
@@ -367,6 +367,8 @@ public class MainDriver extends Driver{
 	 */
 	@Override
 	public TransactionID addTransactions(Transaction transaction, String note) throws IOException {
+		if(transaction.getDestinationCategoryID()==transaction.getSourceCategoryID())
+			throw new IllegalArgumentException("Self-transfer not allowed.");
 		if((transaction.getDestinationCategoryID()!=null)&&(!canWrite(transaction.getDestinationCategoryID())))
 			throw new AuthenticationException("The current user is not authorized to write to destination.");
 		if((transaction.getSourceCategoryID()!=null)&&(!canWrite(transaction.getSourceCategoryID())))
@@ -410,7 +412,6 @@ public class MainDriver extends Driver{
 					eventType = Event.Type.EXPENSE;
 				}
 				else {
-					// Determine transfer or exchange
 					Category source = getCategory(transaction.getSourceCategoryID());
 					Category destination = getCategory(transaction.getDestinationCategoryID());
 					sql = "INSERT INTO transactions " +
@@ -424,10 +425,15 @@ public class MainDriver extends Driver{
 					statement.setString(5, nowDateString);
 					statement.setString(6, nowString);
 					statement.executeUpdate();
-					if(source.getCurrency().equals(destination.getCurrency()))
+					// Determine transfer or exchange
+					if(source.getCurrency().equals(destination.getCurrency())) {
 						eventType = Event.Type.TRANSFER;
-					else
+						if(transaction.getSourceCurrency() != transaction.getDestinationCurrency())
+							throw new IllegalArgumentException("Transfers must have matching source and destination amounts.");
+					}
+					else {
 						eventType = Event.Type.EXCHANGE;
+					}
 				}
 				ResultSet resultSet = statement.getGeneratedKeys();
 				if(!resultSet.next()) {
@@ -525,8 +531,8 @@ public class MainDriver extends Driver{
 			) {
 				statement.setInt(1, Integer.parseInt(categoryID.toString()));
 				statement.setInt(2, Integer.parseInt(categoryID.toString()));
-				if(date !=null)
-					statement.setString(3, date.format(DateTimeFormatter.ISO_DATE_TIME));
+				if(date != null)
+					statement.setString(3, date.format(DateTimeFormatter.ISO_DATE));
 				ResultSet resultSet = statement.executeQuery();
 				LinkedList<Transaction> retval = new LinkedList<>();
 				while(resultSet.next()) {
@@ -549,11 +555,10 @@ public class MainDriver extends Driver{
 	 */
 	@Override
 	public boolean deleteTransaction(TransactionID transactionID, String note) throws IOException {
-		if(!isAdmin(null)) {
-			Transaction transaction = getTransaction(transactionID);
+		Transaction transaction = getTransaction(transactionID);
+		if(!isAdmin(null))
 			if(!(canWrite(transaction.getSourceCategoryID())&&canWrite(transaction.getDestinationCategoryID())))
 				throw new AuthenticationException("The current user is not authorized to write.");
-		}
 		String sql = "UPDATE transactions " +
                 "SET time_deleted = ? " +
 				"WHERE rowid = ? AND time_deleted IS NULL";
@@ -567,28 +572,70 @@ public class MainDriver extends Driver{
 				statement.close();
 
 				if(rowsUpdated>0) {
-					// Update category totals
-					Transaction transaction = getTransaction(transactionID);
-					if(transaction.getDestinationCategoryID()!=null)
-						adjustCategoryTotal(transaction.getDestinationCategoryID(),-transaction.getDestinationCurrency());
-					if(transaction.getSourceCategoryID()!=null)
-						adjustCategoryTotal(transaction.getSourceCategoryID(),transaction.getSourceCurrency());
-
-					// TODO Add ledger items
 					// Add event
 					sql = "INSERT INTO events " +
 			                "(user_id, transaction_id, note, type, date, time_added) " +
-							"VALUES (?,?,?,?,?)";
+							"VALUES (?,?,?,?,?,?)";
 					statement = connection.prepareStatement(sql);
 					LocalDateTime now = LocalDateTime.now();
+					String nowDateString = LocalDate.from(now).format(DateTimeFormatter.ISO_DATE);
+					String nowString = now.format(DateTimeFormatter.ISO_DATE_TIME);
 					statement.setInt(1, Integer.parseInt(user.getUserID().toString()));
 					statement.setInt(2, Integer.parseInt(transactionID.toString()));
 					statement.setString(3, note);
 					statement.setString(4, Event.Type.DELETE.toString());
-					statement.setString(5, LocalDate.from(now).format(DateTimeFormatter.ISO_DATE_TIME));
-					statement.setString(6, now.format(DateTimeFormatter.ISO_DATE_TIME));
+					statement.setString(5, nowDateString);
+					statement.setString(6, nowString);
 					statement.executeUpdate();
+					ResultSet resultSet = statement.getGeneratedKeys();
+					int eventID=-1;
+					if(resultSet.next()) {
+						eventID = resultSet.getInt(1);
+					}
+					resultSet.close();
 					statement.close();
+
+					// Update category totals
+					// Add ledger items
+					if(eventID>=0) {
+						System.out.println(transaction.getDestinationCategoryID());
+						if(transaction.getDestinationCategoryID()!=null) {
+							adjustCategoryTotal(transaction.getDestinationCategoryID(),-transaction.getDestinationCurrency());
+	
+							Category category = getCategory(transaction.getDestinationCategoryID());
+							sql = "INSERT INTO ledger " +
+					                "(category_id, event_id, transaction_id, change, total, date, time_added) " +
+									"VALUES (?,?,?,?,?,?,?)";
+							statement = connection.prepareStatement(sql);
+							statement.setInt(1, Integer.parseInt(transaction.getSourceCategoryID().toString()));
+							statement.setInt(2, eventID);
+							statement.setInt(3, Integer.parseInt(transaction.getId().toString()));
+							statement.setLong(4, -transaction.getDestinationCurrency());
+							statement.setLong(5, category.getTotal());
+							statement.setString(6, nowDateString);
+							statement.setString(7, nowString);
+							statement.executeUpdate();
+							statement.close();
+						}
+						if(transaction.getSourceCategoryID()!=null) {
+							adjustCategoryTotal(transaction.getSourceCategoryID(),transaction.getSourceCurrency());
+	
+							Category category = getCategory(transaction.getSourceCategoryID());
+							sql = "INSERT INTO ledger " +
+					                "(category_id, event_id, transaction_id, change, total, date, time_added) " +
+									"VALUES (?,?,?,?,?,?,?)";
+							statement = connection.prepareStatement(sql);
+							statement.setInt(1, Integer.parseInt(transaction.getSourceCategoryID().toString()));
+							statement.setInt(2, eventID);
+							statement.setInt(3, Integer.parseInt(transaction.getId().toString()));
+							statement.setLong(4, transaction.getSourceCurrency());
+							statement.setLong(5, category.getTotal());
+							statement.setString(6, nowDateString);
+							statement.setString(7, nowString);
+							statement.executeUpdate();
+							statement.close();
+						}
+					}
 				}
 			}
 			catch(SQLException t){
@@ -603,11 +650,10 @@ public class MainDriver extends Driver{
 	 */
 	@Override
 	public boolean undeleteTransaction(TransactionID transactionID, String note) throws IOException {
-		if(!isAdmin(null)) {
-			Transaction transaction = getTransaction(transactionID);
+		Transaction transaction = getTransaction(transactionID);
+		if(!isAdmin(null))
 			if(!(canWrite(transaction.getSourceCategoryID())&&canWrite(transaction.getDestinationCategoryID())))
 				throw new AuthenticationException("The current user is not authorized to write.");
-		}
 		String sql = "UPDATE transactions " +
                 "SET time_deleted = null " +
 				"WHERE rowid = ? AND time_deleted IS NOT NULL";
@@ -620,28 +666,69 @@ public class MainDriver extends Driver{
 				statement.close();
 
 				if(rowsUpdated>0) {
-					// Update category totals
-					Transaction transaction = getTransaction(transactionID);
-					if(transaction.getDestinationCategoryID()!=null)
-						adjustCategoryTotal(transaction.getDestinationCategoryID(),transaction.getDestinationCurrency());
-					if(transaction.getSourceCategoryID()!=null)
-						adjustCategoryTotal(transaction.getSourceCategoryID(),-transaction.getSourceCurrency());
-
-					// TODO Add ledger items
 					// Add event
 					sql = "INSERT INTO events " +
 			                "(user_id, transaction_id, note, type, date, time_added) " +
-							"VALUES (?,?,?,?,?)";
+							"VALUES (?,?,?,?,?,?)";
 					statement = connection.prepareStatement(sql);
 					LocalDateTime now = LocalDateTime.now();
+					String nowDateString = LocalDate.from(now).format(DateTimeFormatter.ISO_DATE);
+					String nowString = now.format(DateTimeFormatter.ISO_DATE_TIME);
 					statement.setInt(1, Integer.parseInt(user.getUserID().toString()));
 					statement.setInt(2, Integer.parseInt(transactionID.toString()));
 					statement.setString(3, note);
 					statement.setString(4, Event.Type.UNDELETE.toString());
-					statement.setString(5, LocalDate.from(now).format(DateTimeFormatter.ISO_DATE_TIME));
-					statement.setString(6, now.format(DateTimeFormatter.ISO_DATE_TIME));
+					statement.setString(5, nowDateString);
+					statement.setString(6, nowString);
 					statement.executeUpdate();
+					ResultSet resultSet = statement.getGeneratedKeys();
+					int eventID=-1;
+					if(resultSet.next()) {
+						eventID = resultSet.getInt(1);
+					}
+					resultSet.close();
 					statement.close();
+
+					// Update category totals
+					// Add ledger items
+					if(eventID>=0) {
+						if(transaction.getDestinationCategoryID()!=null) {
+							adjustCategoryTotal(transaction.getDestinationCategoryID(),transaction.getDestinationCurrency());
+	
+							Category category = getCategory(transaction.getDestinationCategoryID());
+							sql = "INSERT INTO ledger " +
+					                "(category_id, event_id, transaction_id, change, total, date, time_added) " +
+									"VALUES (?,?,?,?,?,?,?)";
+							statement = connection.prepareStatement(sql);
+							statement.setInt(1, Integer.parseInt(transaction.getSourceCategoryID().toString()));
+							statement.setInt(2, eventID);
+							statement.setInt(3, Integer.parseInt(transaction.getId().toString()));
+							statement.setLong(4, transaction.getDestinationCurrency());
+							statement.setLong(5, category.getTotal());
+							statement.setString(6, nowDateString);
+							statement.setString(7, nowString);
+							statement.executeUpdate();
+							statement.close();
+						}
+						if(transaction.getSourceCategoryID()!=null) {
+							adjustCategoryTotal(transaction.getSourceCategoryID(),-transaction.getSourceCurrency());
+	
+							Category category = getCategory(transaction.getSourceCategoryID());
+							sql = "INSERT INTO ledger " +
+					                "(category_id, event_id, transaction_id, change, total, date, time_added) " +
+									"VALUES (?,?,?,?,?,?,?)";
+							statement = connection.prepareStatement(sql);
+							statement.setInt(1, Integer.parseInt(transaction.getSourceCategoryID().toString()));
+							statement.setInt(2, eventID);
+							statement.setInt(3, Integer.parseInt(transaction.getId().toString()));
+							statement.setLong(4, -transaction.getSourceCurrency());
+							statement.setLong(5, category.getTotal());
+							statement.setString(6, nowDateString);
+							statement.setString(7, nowString);
+							statement.executeUpdate();
+							statement.close();
+						}
+					}
 				}
 			}
 			catch(SQLException t){
@@ -821,7 +908,7 @@ public class MainDriver extends Driver{
 					PreparedStatement statement = connection.prepareStatement(sql);
 			) {
 				statement.setInt(1, Integer.parseInt(categoryID.getId()));
-				statement.setString(2, when.format(DateTimeFormatter.ISO_DATE_TIME));
+				statement.setString(2, when.format(DateTimeFormatter.ISO_DATE));
 				ResultSet resultSet = statement.executeQuery();
 				LinkedList<LedgerItem> retval = new LinkedList<>();
 				while(resultSet.next()) {
@@ -1175,12 +1262,14 @@ public class MainDriver extends Driver{
 		String date = resultSet.getString(6);
 		String timeDeleted = resultSet.getString(7);
 		String timeAdded = resultSet.getString(8);
+		String sourceCategoryID=resultSet.getString(2);
+		String destinationCategoryID=resultSet.getString(3);
 		return new Transaction(
 				new TransactionID(""+resultSet.getInt(1)),
-				(date==null)?null:LocalDate.parse(date, DateTimeFormatter.ISO_DATE_TIME),
-				new CategoryID(""+resultSet.getInt(2)),
+				(date==null)?null:LocalDate.parse(date, DateTimeFormatter.ISO_DATE),
+				(sourceCategoryID==null)?null:new CategoryID(sourceCategoryID),
 				resultSet.getLong(4),
-				new CategoryID(""+resultSet.getInt(3)),
+				(destinationCategoryID==null)?null:new CategoryID(destinationCategoryID),
 				resultSet.getLong(5),
 				(timeAdded==null)?null:LocalDateTime.parse(timeAdded, DateTimeFormatter.ISO_DATE_TIME),
 				(timeDeleted==null)?null:LocalDateTime.parse(timeDeleted, DateTimeFormatter.ISO_DATE_TIME)
@@ -1200,7 +1289,7 @@ public class MainDriver extends Driver{
 	}
 
 	private static LedgerItem getLedgerItemFromResultSetRow(ResultSet resultSet) throws SQLException{
-		String timeAdded = resultSet.getString(6);
+		String timeAdded = resultSet.getString(7);
 		return new LedgerItem(
 				new TransactionID(""+resultSet.getInt(1)),
 				new EventID(""+resultSet.getInt(2)),

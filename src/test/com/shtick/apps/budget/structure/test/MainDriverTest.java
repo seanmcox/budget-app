@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -18,8 +20,12 @@ import org.junit.jupiter.api.Test;
 import com.shtick.apps.budget.structure.model.Category;
 import com.shtick.apps.budget.structure.model.CategoryID;
 import com.shtick.apps.budget.structure.model.CurrencyID;
+import com.shtick.apps.budget.structure.model.Event;
+import com.shtick.apps.budget.structure.model.EventID;
+import com.shtick.apps.budget.structure.model.LedgerItem;
 import com.shtick.apps.budget.structure.model.Permission;
 import com.shtick.apps.budget.structure.model.Transaction;
+import com.shtick.apps.budget.structure.model.TransactionID;
 import com.shtick.apps.budget.structure.model.User;
 import com.shtick.apps.budget.structure.model.UserID;
 
@@ -235,19 +241,383 @@ class MainDriverTest {
 	}
 
 	@Test
-	void testAddTransaction() {
-		com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
-		try {
+	void testAddTransferTransaction() {
+		LocalDate today = LocalDate.now();
+		try { // Basic transfer transaction
+			com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
 			UserID userID = mainDriver.addUser(new User(null, "tester", true, null), "password");
 			mainDriver.login("tester", "password");
 			CategoryID categoryID1 = mainDriver.addCategory(new Category(null,null,"toys",new CurrencyID("1"),100,null,null));
 			CategoryID categoryID2 = mainDriver.addCategory(new Category(null,null,"tools",new CurrencyID("1"),100,null,null));
 			CategoryID categoryID3 = mainDriver.addCategory(new Category(null,null,"alpacas",new CurrencyID("12"),100,null,null));
-			mainDriver.addTransactions(new Transaction(null, null, categoryID1, 5, categoryID2, 5, null, null), "A test transaction.");
+			List<Transaction> transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			List<Transaction> transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			List<Transaction> transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			TransactionID transactionID = mainDriver.addTransactions(new Transaction(null, today, categoryID1, 5, categoryID2, 5, null, null), "A test transaction.");
+			assertNotNull(transactionID);
+			transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(1,transactions1.size());
+			assertEquals(1,transactions2.size());
+			assertEquals(0,transactions3.size());
+			assertEquals(transactionID,transactions1.get(0).getId());
+			assertEquals(transactionID,transactions2.get(0).getId());
+			assertEquals(today,transactions2.get(0).getWhen());
+			assertEquals(5,transactions2.get(0).getSourceCurrency());
+			assertEquals(5,transactions2.get(0).getDestinationCurrency());
+			assertNull(transactions2.get(0).getDeletedDate());
+			assertNotNull(transactions2.get(0).getAddedDate());
+			List<Event> events = mainDriver.getEvents(10);
+			assertEquals(1,events.size());
+			assertEquals(transactionID,events.get(0).getTransactionID());
+			assertEquals("A test transaction.",events.get(0).getNote());
+			assertEquals(Event.Type.TRANSFER,events.get(0).getType());
+			assertEquals(userID,events.get(0).getUserID());
+			assertNotNull(events.get(0).getWhen());
+			assertNotNull(events.get(0).getId());
+			List<LedgerItem> ledgerItems1 = mainDriver.getLedgerItems(categoryID1, today);
+			List<LedgerItem> ledgerItems2 = mainDriver.getLedgerItems(categoryID2, today);
+			List<LedgerItem> ledgerItems3 = mainDriver.getLedgerItems(categoryID3, today);
+			assertEquals(1,ledgerItems1.size());
+			assertEquals(1,ledgerItems2.size());
+			assertEquals(0,ledgerItems3.size());
+			assertEquals(categoryID1,ledgerItems1.get(0).getCategoryID());
+			assertEquals(-5,ledgerItems1.get(0).getChange());
+			assertEquals(events.get(0).getId(),ledgerItems1.get(0).getEventID());
+			assertEquals(-5,ledgerItems1.get(0).getTotal());
+			assertEquals(transactionID,ledgerItems1.get(0).getTransactionID());
+			assertNotNull(ledgerItems1.get(0).getTimeAdded());
+			assertEquals(categoryID2,ledgerItems2.get(0).getCategoryID());
+			assertEquals(5,ledgerItems2.get(0).getChange());
+			assertEquals(events.get(0).getId(),ledgerItems2.get(0).getEventID());
+			assertEquals(5,ledgerItems2.get(0).getTotal());
+			assertEquals(transactionID,ledgerItems2.get(0).getTransactionID());
+			assertNotNull(ledgerItems2.get(0).getTimeAdded());
+			
+			try { // Test transfer with unequal currency amounts.
+				transactionID = mainDriver.addTransactions(new Transaction(null, today, categoryID1, 5, categoryID2, 4, null, null), "A test transaction.");
+				fail("Invalid transaction should throw exception.");
+			}
+			catch(IllegalArgumentException t) {
+				// Expected
+			}
+			
+			try { // Test self-transfer.
+				transactionID = mainDriver.addTransactions(new Transaction(null, today, categoryID1, 5, categoryID1, 5, null, null), "A test transaction.");
+				fail("Invalid transaction should throw exception.");
+			}
+			catch(IllegalArgumentException t) {
+				// Expected
+			}
 		}
 		catch(IOException t) {
 			fail(t);
 		}
 	}
 
+	@Test
+	void testAddExchangeTransaction() {
+		LocalDate today = LocalDate.now();
+		try { // Basic transfer transaction
+			com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
+			UserID userID = mainDriver.addUser(new User(null, "tester", true, null), "password");
+			mainDriver.login("tester", "password");
+			CategoryID categoryID1 = mainDriver.addCategory(new Category(null,null,"toys",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID2 = mainDriver.addCategory(new Category(null,null,"tools",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID3 = mainDriver.addCategory(new Category(null,null,"alpacas",new CurrencyID("12"),100,null,null));
+			List<Transaction> transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			List<Transaction> transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			List<Transaction> transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			TransactionID transactionID = mainDriver.addTransactions(new Transaction(null, today, categoryID1, 5, categoryID3, 1, null, null), "A test transaction.");
+			assertNotNull(transactionID);
+			transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(1,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(1,transactions3.size());
+			assertEquals(transactionID,transactions1.get(0).getId());
+			assertEquals(transactionID,transactions3.get(0).getId());
+			assertEquals(today,transactions3.get(0).getWhen());
+			assertEquals(5,transactions3.get(0).getSourceCurrency());
+			assertEquals(1,transactions3.get(0).getDestinationCurrency());
+			assertNull(transactions3.get(0).getDeletedDate());
+			assertNotNull(transactions3.get(0).getAddedDate());
+			List<Event> events = mainDriver.getEvents(10);
+			assertEquals(1,events.size());
+			assertEquals(transactionID,events.get(0).getTransactionID());
+			assertEquals("A test transaction.",events.get(0).getNote());
+			assertEquals(Event.Type.EXCHANGE,events.get(0).getType());
+			assertEquals(userID,events.get(0).getUserID());
+			assertNotNull(events.get(0).getWhen());
+			assertNotNull(events.get(0).getId());
+			List<LedgerItem> ledgerItems1 = mainDriver.getLedgerItems(categoryID1, today);
+			List<LedgerItem> ledgerItems2 = mainDriver.getLedgerItems(categoryID2, today);
+			List<LedgerItem> ledgerItems3 = mainDriver.getLedgerItems(categoryID3, today);
+			assertEquals(1,ledgerItems1.size());
+			assertEquals(0,ledgerItems2.size());
+			assertEquals(1,ledgerItems3.size());
+			assertEquals(categoryID1,ledgerItems1.get(0).getCategoryID());
+			assertEquals(-5,ledgerItems1.get(0).getChange());
+			assertEquals(events.get(0).getId(),ledgerItems1.get(0).getEventID());
+			assertEquals(-5,ledgerItems1.get(0).getTotal());
+			assertEquals(transactionID,ledgerItems1.get(0).getTransactionID());
+			assertNotNull(ledgerItems1.get(0).getTimeAdded());
+			assertEquals(categoryID3,ledgerItems3.get(0).getCategoryID());
+			assertEquals(1,ledgerItems3.get(0).getChange());
+			assertEquals(events.get(0).getId(),ledgerItems3.get(0).getEventID());
+			assertEquals(1,ledgerItems3.get(0).getTotal());
+			assertEquals(transactionID,ledgerItems3.get(0).getTransactionID());
+			assertNotNull(ledgerItems3.get(0).getTimeAdded());
+		}
+		catch(IOException t) {
+			fail(t);
+		}
+	}
+
+	@Test
+	void testAddIncomeTransaction() {
+		LocalDate today = LocalDate.now();
+		try { // Basic transfer transaction
+			com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
+			UserID userID = mainDriver.addUser(new User(null, "tester", true, null), "password");
+			mainDriver.login("tester", "password");
+			CategoryID categoryID1 = mainDriver.addCategory(new Category(null,null,"toys",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID2 = mainDriver.addCategory(new Category(null,null,"tools",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID3 = mainDriver.addCategory(new Category(null,null,"alpacas",new CurrencyID("12"),100,null,null));
+			List<Transaction> transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			List<Transaction> transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			List<Transaction> transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			TransactionID transactionID = mainDriver.addTransactions(new Transaction(null, today, null, 0, categoryID3, 1, null, null), "A test transaction.");
+			assertNotNull(transactionID);
+			transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(1,transactions3.size());
+			assertEquals(transactionID,transactions3.get(0).getId());
+			assertEquals(today,transactions3.get(0).getWhen());
+			assertEquals(0,transactions3.get(0).getSourceCurrency());
+			assertEquals(1,transactions3.get(0).getDestinationCurrency());
+			assertNull(transactions3.get(0).getDeletedDate());
+			assertNotNull(transactions3.get(0).getAddedDate());
+			List<Event> events = mainDriver.getEvents(10);
+			assertEquals(1,events.size());
+			assertEquals(transactionID,events.get(0).getTransactionID());
+			assertEquals("A test transaction.",events.get(0).getNote());
+			assertEquals(Event.Type.INCOME,events.get(0).getType());
+			assertEquals(userID,events.get(0).getUserID());
+			assertNotNull(events.get(0).getWhen());
+			assertNotNull(events.get(0).getId());
+			List<LedgerItem> ledgerItems1 = mainDriver.getLedgerItems(categoryID1, today);
+			List<LedgerItem> ledgerItems2 = mainDriver.getLedgerItems(categoryID2, today);
+			List<LedgerItem> ledgerItems3 = mainDriver.getLedgerItems(categoryID3, today);
+			assertEquals(0,ledgerItems1.size());
+			assertEquals(0,ledgerItems2.size());
+			assertEquals(1,ledgerItems3.size());
+			assertEquals(categoryID3,ledgerItems3.get(0).getCategoryID());
+			assertEquals(1,ledgerItems3.get(0).getChange());
+			assertEquals(events.get(0).getId(),ledgerItems3.get(0).getEventID());
+			assertEquals(1,ledgerItems3.get(0).getTotal());
+			assertEquals(transactionID,ledgerItems3.get(0).getTransactionID());
+			assertNotNull(ledgerItems3.get(0).getTimeAdded());
+		}
+		catch(IOException t) {
+			fail(t);
+		}
+	}
+
+	@Test
+	void testAddExpenseTransaction() {
+		LocalDate today = LocalDate.now();
+		try { // Basic transfer transaction
+			com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
+			UserID userID = mainDriver.addUser(new User(null, "tester", true, null), "password");
+			mainDriver.login("tester", "password");
+			CategoryID categoryID1 = mainDriver.addCategory(new Category(null,null,"toys",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID2 = mainDriver.addCategory(new Category(null,null,"tools",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID3 = mainDriver.addCategory(new Category(null,null,"alpacas",new CurrencyID("12"),100,null,null));
+			List<Transaction> transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			List<Transaction> transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			List<Transaction> transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			TransactionID transactionID = mainDriver.addTransactions(new Transaction(null, today, categoryID1, 5, null, 0, null, null), "A test transaction.");
+			assertNotNull(transactionID);
+			transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(1,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			assertEquals(transactionID,transactions1.get(0).getId());
+			assertEquals(today,transactions1.get(0).getWhen());
+			assertEquals(5,transactions1.get(0).getSourceCurrency());
+			assertEquals(0,transactions1.get(0).getDestinationCurrency());
+			assertNull(transactions1.get(0).getDeletedDate());
+			assertNotNull(transactions1.get(0).getAddedDate());
+			List<Event> events = mainDriver.getEvents(10);
+			assertEquals(1,events.size());
+			assertEquals(transactionID,events.get(0).getTransactionID());
+			assertEquals("A test transaction.",events.get(0).getNote());
+			assertEquals(Event.Type.EXPENSE,events.get(0).getType());
+			assertEquals(userID,events.get(0).getUserID());
+			assertNotNull(events.get(0).getWhen());
+			assertNotNull(events.get(0).getId());
+			List<LedgerItem> ledgerItems1 = mainDriver.getLedgerItems(categoryID1, today);
+			List<LedgerItem> ledgerItems2 = mainDriver.getLedgerItems(categoryID2, today);
+			List<LedgerItem> ledgerItems3 = mainDriver.getLedgerItems(categoryID3, today);
+			assertEquals(1,ledgerItems1.size());
+			assertEquals(0,ledgerItems2.size());
+			assertEquals(0,ledgerItems3.size());
+			assertEquals(categoryID1,ledgerItems1.get(0).getCategoryID());
+			assertEquals(-5,ledgerItems1.get(0).getChange());
+			assertEquals(events.get(0).getId(),ledgerItems1.get(0).getEventID());
+			assertEquals(-5,ledgerItems1.get(0).getTotal());
+			assertEquals(transactionID,ledgerItems1.get(0).getTransactionID());
+			assertNotNull(ledgerItems1.get(0).getTimeAdded());
+		}
+		catch(IOException t) {
+			fail(t);
+		}
+	}
+
+	@Test
+	void testDeleteRestoreTransaction() {
+		LocalDate today = LocalDate.now();
+		try { // Basic transfer transaction
+			com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
+			UserID userID = mainDriver.addUser(new User(null, "tester", true, null), "password");
+			mainDriver.login("tester", "password");
+			CategoryID categoryID1 = mainDriver.addCategory(new Category(null,null,"toys",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID2 = mainDriver.addCategory(new Category(null,null,"tools",new CurrencyID("1"),100,null,null));
+			CategoryID categoryID3 = mainDriver.addCategory(new Category(null,null,"alpacas",new CurrencyID("12"),100,null,null));
+			List<Transaction> transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			List<Transaction> transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			List<Transaction> transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			TransactionID transactionID = mainDriver.addTransactions(new Transaction(null, today, categoryID1, 5, null, 0, null, null), "A test transaction.");
+			mainDriver.deleteTransaction(transactionID, "Test delete");
+			assertNotNull(transactionID);
+			transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(1,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			assertEquals(transactionID,transactions1.get(0).getId());
+			assertEquals(today,transactions1.get(0).getWhen());
+			assertEquals(5,transactions1.get(0).getSourceCurrency());
+			assertEquals(0,transactions1.get(0).getDestinationCurrency());
+			assertNotNull(transactions1.get(0).getDeletedDate());
+			assertNotNull(transactions1.get(0).getAddedDate());
+			transactions1 = mainDriver.getTransactions(categoryID1, today, false);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, false);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, false);
+			assertEquals(0,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			List<Event> events = mainDriver.getEvents(10);
+			assertEquals(2,events.size());
+			EventID deleteEventID;
+			{
+				HashMap<String,Event> notes = new HashMap<>();
+				for(Event event:events) {
+					assertEquals(transactionID,event.getTransactionID());
+					assertEquals(userID,event.getUserID());
+					assertNotNull(event.getWhen());
+					assertNotNull(event.getId());
+					notes.put(event.getNote(),event);
+				}
+				assertTrue(notes.containsKey("A test transaction."));
+				assertTrue(notes.containsKey("Test delete"));
+				assertEquals(Event.Type.DELETE,notes.get("Test delete").getType());
+				deleteEventID = notes.get("Test delete").getId();
+			}
+			List<LedgerItem> ledgerItems1 = mainDriver.getLedgerItems(categoryID1, today);
+			List<LedgerItem> ledgerItems2 = mainDriver.getLedgerItems(categoryID2, today);
+			List<LedgerItem> ledgerItems3 = mainDriver.getLedgerItems(categoryID3, today);
+			assertEquals(2,ledgerItems1.size());
+			assertEquals(0,ledgerItems2.size());
+			assertEquals(0,ledgerItems3.size());
+			{
+				HashMap<EventID,LedgerItem> ledgerItemsByEventID = new HashMap<>();
+				for(LedgerItem item:ledgerItems1) {
+					assertEquals(categoryID1,item.getCategoryID());
+					assertEquals(transactionID,item.getTransactionID());
+					assertNotNull(item.getTimeAdded());
+					ledgerItemsByEventID.put(item.getEventID(),item);
+				}
+				assertTrue(ledgerItemsByEventID.containsKey(deleteEventID));
+				assertEquals(5,ledgerItemsByEventID.get(deleteEventID).getChange());
+				assertEquals(0,ledgerItemsByEventID.get(deleteEventID).getTotal());
+			}
+			mainDriver.undeleteTransaction(transactionID, "Test undelete");
+			transactions1 = mainDriver.getTransactions(categoryID1, today, true);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, true);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, true);
+			assertEquals(1,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			transactions1 = mainDriver.getTransactions(categoryID1, today, false);
+			transactions2 = mainDriver.getTransactions(categoryID2, today, false);
+			transactions3 = mainDriver.getTransactions(categoryID3, today, false);
+			assertEquals(1,transactions1.size());
+			assertEquals(0,transactions2.size());
+			assertEquals(0,transactions3.size());
+			events = mainDriver.getEvents(10);
+			assertEquals(3,events.size());
+			EventID undeleteEventID;
+			{
+				HashMap<String,Event> notes = new HashMap<>();
+				for(Event event:events) {
+					assertEquals(transactionID,event.getTransactionID());
+					assertEquals(userID,event.getUserID());
+					assertNotNull(event.getWhen());
+					assertNotNull(event.getId());
+					notes.put(event.getNote(),event);
+				}
+				assertTrue(notes.containsKey("A test transaction."));
+				assertTrue(notes.containsKey("Test delete"));
+				assertTrue(notes.containsKey("Test undelete"));
+				assertEquals(Event.Type.UNDELETE,notes.get("Test undelete").getType());
+				undeleteEventID = notes.get("Test undelete").getId();
+			}
+			ledgerItems1 = mainDriver.getLedgerItems(categoryID1, today);
+			ledgerItems2 = mainDriver.getLedgerItems(categoryID2, today);
+			ledgerItems3 = mainDriver.getLedgerItems(categoryID3, today);
+			assertEquals(3,ledgerItems1.size());
+			assertEquals(0,ledgerItems2.size());
+			assertEquals(0,ledgerItems3.size());
+			{
+				HashMap<EventID,LedgerItem> ledgerItemsByEventID = new HashMap<>();
+				for(LedgerItem item:ledgerItems1) {
+					assertEquals(categoryID1,item.getCategoryID());
+					assertEquals(transactionID,item.getTransactionID());
+					assertNotNull(item.getTimeAdded());
+					ledgerItemsByEventID.put(item.getEventID(),item);
+				}
+				assertTrue(ledgerItemsByEventID.containsKey(undeleteEventID));
+				assertEquals(-5,ledgerItemsByEventID.get(undeleteEventID).getChange());
+				assertEquals(-5,ledgerItemsByEventID.get(undeleteEventID).getTotal());
+			}
+		}
+		catch(IOException t) {
+			fail(t);
+		}
+	}
 }
