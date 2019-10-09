@@ -16,7 +16,7 @@ public class Info {
 	/**
 	 * The application version.
 	 */
-	public static final String VERSION = "2019 September";
+	public static final String VERSION = "2019 October";
 	
 	/**
 	 * Developer name.
