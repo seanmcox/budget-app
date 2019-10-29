@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import com.shtick.apps.budget.structure.model.Category;
 import com.shtick.apps.budget.structure.model.CategoryID;
+import com.shtick.apps.budget.structure.model.Currency;
 import com.shtick.apps.budget.structure.model.CurrencyID;
 import com.shtick.apps.budget.structure.model.Event;
 import com.shtick.apps.budget.structure.model.EventID;
@@ -234,6 +235,61 @@ class MainDriverTest {
 				Category category = mainDriver.getCategory(categoryID3);
 				assertEquals("vgames",category.getName());
 			}
+		}
+		catch(IOException t) {
+			fail(t);
+		}
+	}
+
+	@Test
+	void testCurrencies() {
+		com.shtick.apps.budget.structure.MainDriver mainDriver = new com.shtick.apps.budget.structure.MainDriver(TEST_WORKING_DIRECTORY);
+		try {
+			UserID userID = mainDriver.addUser(new User(null, "tester", true, null), "password");
+			mainDriver.login("tester", "password");
+			List<Currency> currencies = mainDriver.getCurrencies();
+			assertEquals(0,currencies.size());
+			CurrencyID currencyID1 = mainDriver.addCurrency(new Currency(null, "dollars", "blah", "{}", null));
+			assertNotNull(currencyID1);
+			currencies = mainDriver.getCurrencies();
+			assertEquals(1,currencies.size());
+			assertEquals(currencyID1,currencies.get(0).getId());
+			
+			CurrencyID currencyID2 = mainDriver.addCurrency(new Currency(null,"alpacas","qwerty","-",null));
+			assertNotNull(currencyID2);
+			currencies = mainDriver.getCurrencies();
+			assertEquals(2,currencies.size());
+			{ // Check that expected categories returned in list.
+				HashMap<CurrencyID,Currency> currencyByID = new HashMap<>();
+				for(Currency currency:currencies)
+					currencyByID.put(currency.getId(),currency);
+				assertTrue(currencyByID.containsKey(currencyID1));
+				assertTrue(currencyByID.containsKey(currencyID2));
+				assertEquals("dollars",currencyByID.get(currencyID1).getName());
+				assertEquals("blah",currencyByID.get(currencyID1).getType());
+				assertEquals("{}",currencyByID.get(currencyID1).getConfig());
+				assertEquals("alpacas",currencyByID.get(currencyID2).getName());
+				assertEquals("qwerty",currencyByID.get(currencyID2).getType());
+				assertEquals("-",currencyByID.get(currencyID2).getConfig());
+			}
+			
+			mainDriver.updateCurrencyName(currencyID2, "sheep");
+			currencies = mainDriver.getCurrencies();
+			assertEquals(2,currencies.size());
+			{ // Check that expected categories returned in list.
+				HashMap<CurrencyID,Currency> currencyByID = new HashMap<>();
+				for(Currency currency:currencies)
+					currencyByID.put(currency.getId(),currency);
+				assertEquals("dollars",currencyByID.get(currencyID1).getName());
+				assertEquals("sheep",currencyByID.get(currencyID2).getName());
+				assertEquals("qwerty",currencyByID.get(currencyID2).getType());
+				assertEquals("-",currencyByID.get(currencyID2).getConfig());
+			}
+
+			mainDriver.deleteCurrency(currencyID2);
+			currencies = mainDriver.getCurrencies();
+			assertEquals(1,currencies.size());
+			assertEquals(currencyID1,currencies.get(0).getId());
 		}
 		catch(IOException t) {
 			fail(t);

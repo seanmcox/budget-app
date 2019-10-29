@@ -29,6 +29,7 @@ import javax.security.sasl.AuthenticationException;
 import com.shtick.apps.budget.Driver;
 import com.shtick.apps.budget.structure.model.Category;
 import com.shtick.apps.budget.structure.model.CategoryID;
+import com.shtick.apps.budget.structure.model.Currency;
 import com.shtick.apps.budget.structure.model.CurrencyID;
 import com.shtick.apps.budget.structure.model.Event;
 import com.shtick.apps.budget.structure.model.EventID;
@@ -114,6 +115,7 @@ public class MainDriver extends Driver{
 		                   " time_deleted  TEXT" +
 		                   ")");
 				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_category_parent ON categories (parent_id);");
+				statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_category_currency ON categories (currency_id);");
 				statement.executeUpdate("CREATE TABLE IF NOT EXISTS category_permissions" +
 		                   "(category_id   INT  NOT NULL," +
 		                   " user_id       INT  NOT NULL," +
@@ -247,6 +249,41 @@ public class MainDriver extends Driver{
 	}
 
 	/* (non-Javadoc)
+	 * @see com.shtick.apps.budget.Driver#getCategoriesByCurrency(com.shtick.apps.budget.structure.model.CurrencyID, boolean)
+	 */
+	@Override
+	public List<Category> getCategoriesByCurrency(CurrencyID currencyID, boolean includeDeleted) throws IOException {
+		return this.getCategoriesByCurrency(currencyID, includeDeleted, true);
+	}
+
+	private List<Category> getCategoriesByCurrency(CurrencyID currencyID, boolean includeDeleted, boolean filterByVisibility) throws IOException {
+		String sql = "SELECT rowid, parent_id, name, currency_id, total, time_added, time_deleted " +
+				"FROM categories WHERE currency_id = ?";
+		if(!includeDeleted)
+			sql += " AND time_deleted IS NULL";
+		synchronized(DB_LOCK){
+			try (
+					Connection connection = DriverManager.getConnection(DB_URL);
+					PreparedStatement statement = connection.prepareStatement(sql);
+			) {
+				statement.setInt(1, Integer.parseInt(currencyID.toString()));
+				ResultSet resultSet = statement.executeQuery();
+				LinkedList<Category> retval = new LinkedList<>();
+				while(resultSet.next()) {
+					Category category = getCategoryFromResultSetRow(resultSet);
+					if((!filterByVisibility)||canRead(category.getId()))
+						retval.add(category);
+				}
+				resultSet.close();
+				return retval;
+			}
+			catch(SQLException t){
+				throw new IOException(t);
+			}
+		}
+	}
+
+	/* (non-Javadoc)
 	 * @see com.shtick.apps.budget.Driver#removeCategory(com.shtick.apps.budget.structure.model.CategoryID)
 	 */
 	@Override
@@ -363,6 +400,122 @@ public class MainDriver extends Driver{
 	}
 
 	/* (non-Javadoc)
+	 * @see com.shtick.apps.budget.Driver#getCurrencies()
+	 */
+	@Override
+	public List<Currency> getCurrencies() throws IOException {
+		String sql = "SELECT rowid, name, type, config, time_added " +
+				"FROM currencies";
+		synchronized(DB_LOCK){
+			try (
+					Connection connection = DriverManager.getConnection(DB_URL);
+					PreparedStatement statement = connection.prepareStatement(sql);
+			) {
+				ResultSet resultSet = statement.executeQuery();
+				LinkedList<Currency> retval = new LinkedList<>();
+				while(resultSet.next()) {
+					Currency currency = getCurrencyFromResultSetRow(resultSet);
+					retval.add(currency);
+				}
+				resultSet.close();
+				return retval;
+			}
+			catch(SQLException t){
+				throw new IOException(t);
+			}
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see com.shtick.apps.budget.Driver#addCurrency(com.shtick.apps.budget.structure.model.Currency)
+	 */
+	@Override
+	public CurrencyID addCurrency(Currency currency) throws IOException {
+		// Auth
+		if(!isAdmin())
+			throw new AuthenticationException("The current user is not an authorized admin.");
+
+        String columnList = "name, type, config, time_added";
+		String valueList = "?,?,?,?";
+		String sql = "INSERT INTO currencies " +
+                "("+columnList+") " +
+				"VALUES ("+valueList+")";
+		synchronized(DB_LOCK){
+			try (Connection connection = DriverManager.getConnection(DB_URL);PreparedStatement statement = connection.prepareStatement(sql);) {
+				statement.setString(1, currency.getName());
+				statement.setString(2, currency.getType());
+				statement.setString(3, currency.getConfig());
+				statement.setString(4, LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME));
+				statement.executeUpdate();
+				ResultSet resultSet = statement.getGeneratedKeys();
+				if(!resultSet.next()) {
+					resultSet.close();
+					return null;
+				}
+				CurrencyID retval = new CurrencyID(""+resultSet.getInt(1));
+				resultSet.close();
+				return retval;
+			}
+			catch(SQLException t){
+				throw new IOException(t);
+			}
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see com.shtick.apps.budget.Driver#deleteCurrency(com.shtick.apps.budget.structure.model.CurrencyID)
+	 */
+	@Override
+	public void deleteCurrency(CurrencyID currencyID) throws IOException {
+		// Auth
+		if(!isAdmin())
+			throw new AuthenticationException("The current user is not an authorized admin.");
+
+		// Check to see if the currency is being used.
+		List<Category> categories = getCategoriesByCurrency(currencyID, true, false);
+		if(categories.size()>0)
+			throw new IOException("Currency in use.");
+		
+		// Delete currency
+		String sql = "DELETE FROM currencies " +
+                "WHERE rowid = ?";
+		synchronized(DB_LOCK){
+			try (Connection connection = DriverManager.getConnection(DB_URL);PreparedStatement statement = connection.prepareStatement(sql);) {
+				statement.setInt(1, Integer.parseInt(currencyID.getId()));
+				statement.executeUpdate();
+			}
+			catch(SQLException t){
+				throw new IOException(t);
+			}
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see com.shtick.apps.budget.Driver#updateCurrencyName(com.shtick.apps.budget.structure.model.CurrencyID, java.lang.String)
+	 */
+	@Override
+	public void updateCurrencyName(CurrencyID currencyID, String name) throws IOException {
+		// Auth
+		if(!isAdmin())
+			throw new AuthenticationException("The current user is not an authorized admin.");
+
+		// Check to see if there are non-deleted subcategories that would be affected.
+		String sql = "UPDATE currencies " +
+                "SET name = ? " +
+				"WHERE rowid = ?";
+		synchronized(DB_LOCK){
+			try (Connection connection = DriverManager.getConnection(DB_URL);PreparedStatement statement = connection.prepareStatement(sql);) {
+				statement.setString(1, name);
+				statement.setInt(2, Integer.parseInt(currencyID.toString()));
+				statement.executeUpdate();
+			}
+			catch(SQLException t){
+				throw new IOException(t);
+			}
+		}
+	}
+
+	/* (non-Javadoc)
 	 * @see com.shtick.apps.budget.Driver#addTransactions(com.shtick.apps.budget.structure.model.Transaction)
 	 */
 	@Override
@@ -444,7 +597,6 @@ public class MainDriver extends Driver{
 				resultSet.close();
 				statement.close();
 
-				// TODO Add ledger items
 				// Add event
 				sql = "INSERT INTO events " +
 		                "(user_id, transaction_id, note, type, date, time_added) " +
@@ -1057,6 +1209,18 @@ public class MainDriver extends Driver{
 	}
 
 	/* (non-Javadoc)
+	 * @see com.shtick.apps.budget.Driver#isAdmin()
+	 */
+	@Override
+	public boolean isAdmin() throws IOException{
+		if(user==null)
+			return false;
+		if(user.isAdmin())
+			return true;
+		return false;
+	}
+
+	/* (non-Javadoc)
 	 * @see com.shtick.apps.budget.Driver#isAdmin(com.shtick.apps.budget.structure.model.CategoryID)
 	 */
 	@Override
@@ -1255,6 +1419,16 @@ public class MainDriver extends Driver{
 				resultSet.getInt(5),
 				LocalDateTime.parse(resultSet.getString(6), DateTimeFormatter.ISO_DATE_TIME),
 				(timeDeleted==null)?null:LocalDateTime.parse(timeDeleted, DateTimeFormatter.ISO_DATE_TIME)
+				);
+	}
+
+	private static Currency getCurrencyFromResultSetRow(ResultSet resultSet) throws SQLException{
+		return new Currency(
+				new CurrencyID(""+resultSet.getInt(1)),
+				resultSet.getString(2),
+				resultSet.getString(3),
+				resultSet.getString(4),
+				LocalDateTime.parse(resultSet.getString(5), DateTimeFormatter.ISO_DATE_TIME)
 				);
 	}
 

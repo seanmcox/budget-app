@@ -9,6 +9,8 @@ import java.util.List;
 
 import com.shtick.apps.budget.structure.model.Category;
 import com.shtick.apps.budget.structure.model.CategoryID;
+import com.shtick.apps.budget.structure.model.Currency;
+import com.shtick.apps.budget.structure.model.CurrencyID;
 import com.shtick.apps.budget.structure.model.Event;
 import com.shtick.apps.budget.structure.model.EventID;
 import com.shtick.apps.budget.structure.model.LedgerItem;
@@ -118,7 +120,37 @@ public abstract class Driver {
 	 * @throws IOException 
 	 */
 	public abstract List<LedgerItem> getLedgerItems(TransactionID transactionID) throws IOException;
-	
+
+	/**
+	 * 
+	 * @return A list of all currencies.
+	 * @throws IOException
+	 */
+	public abstract List<Currency> getCurrencies() throws IOException;
+
+	/**
+	 * 
+	 * @param currency
+	 * @return The ID of the newly created currency.
+	 * @throws IOException
+	 */
+	public abstract CurrencyID addCurrency(Currency currency) throws IOException;
+
+	/**
+	 * 
+	 * @param currencyID
+	 * @throws IOException
+	 */
+	public abstract void deleteCurrency(CurrencyID currencyID) throws IOException;
+
+	/**
+	 * 
+	 * @param currencyID
+	 * @param name
+	 * @throws IOException
+	 */
+	public abstract void updateCurrencyName(CurrencyID currencyID, String name) throws IOException;
+
 	/**
 	 * 
 	 * @param parentCategory 
@@ -128,6 +160,16 @@ public abstract class Driver {
 	 * 
 	 */
 	public abstract List<Category> getCategories(CategoryID parentCategory, boolean includeDeleted) throws IOException;
+	
+	/**
+	 * 
+	 * @param currencyID 
+	 * @param includeDeleted 
+	 * @return A list of categories that utilize the given currency.
+	 * @throws IOException
+	 * 
+	 */
+	public abstract List<Category> getCategoriesByCurrency(CurrencyID currencyID, boolean includeDeleted) throws IOException;
 	
 	/**
 	 * 
@@ -238,6 +280,13 @@ public abstract class Driver {
 	 * @throws IOException
 	 */
 	public abstract void deletePermission(CategoryID categoryID, UserID userID) throws IOException;
+	
+	/**
+	 * 
+	 * @return true if the logged-in user is a global admin.
+	 * @throws IOException
+	 */
+	public abstract boolean isAdmin() throws IOException;
 	
 	/**
 	 * 

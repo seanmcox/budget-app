@@ -31,6 +31,7 @@ public class MainFrame extends JFrame {
 		contentPane.setLayout(new BorderLayout());
 		
 		contentPane.add(tabbedPane,BorderLayout.CENTER);
+		openTab("Categories",new CategoriesSummaryPanel());
 		
 		this.setDefaultCloseOperation(MainFrame.EXIT_ON_CLOSE);
 	}
